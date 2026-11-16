@@ -1,0 +1,108 @@
+// Aged Care Workforce: DAX measures (all kept in the _Measures table)
+
+// ---------- Daily Huddle ----------
+Shifts with no RN = COUNTROWS ( vw_ShiftsWithoutRN ) + 0
+
+Unfilled Shifts = COUNTROWS ( vw_UnfilledShifts )
+
+No Shows = COUNTROWS ( vw_NoShows ) + 0
+
+// Leave has no HomeID, so turn on the inactive Staff to Homes relationship
+Sick Calls =
+CALCULATE (
+    COUNTROWS ( Leave ),
+    USERELATIONSHIP ( Staff[HomeID], Homes[HomeID] )
+)
+
+Hours Worked =
+SUMX ( Timesheets, Timesheets[ShiftHours] + Timesheets[OvertimeHours] )
+
+Agency Hours =
+CALCULATE ( [Hours Worked], Staff[EmploymentType] = "Agency" )
+
+Agency % = DIVIDE ( [Agency Hours], [Hours Worked] )
+
+Overtime Hours = SUM ( Timesheets[OvertimeHours] )
+
+Resident Days = SUM ( DailyOccupancy[OccupiedBeds] )
+
+Care Minutes per Resident = DIVIDE ( [Hours Worked] * 60, [Resident Days] )
+
+Care Minutes Target = 180
+
+Care Minutes vs Target = [Care Minutes per Resident] - [Care Minutes Target]
+
+Open Shifts Tomorrow =
+VAR Today = MAX ( 'Date'[Date] )
+RETURN
+    CALCULATE (
+        COUNTROWS ( Roster ),
+        ISBLANK ( Roster[StaffID] ),
+        REMOVEFILTERS ( 'Date' ),
+        'Date'[Date] = Today + 1
+    ) + 0
+
+// KEEPFILTERS keeps the chart's own ShiftSource filter
+Shifts Covered =
+CALCULATE ( COUNTROWS ( Roster ), KEEPFILTERS ( Roster[ShiftSource] <> "Planned" ) )
+
+// Uses the disconnected 'Chart Dates' table so the date slicer
+// can pick "as at" while the chart still shows 14 days
+Care Minutes Last 14 Days =
+VAR AsAt = MAX ( 'Date'[Date] )
+VAR ChartDay = MAX ( 'Chart Dates'[Date] )
+RETURN
+    IF (
+        ChartDay > AsAt - 14 && ChartDay <= AsAt,
+        CALCULATE (
+            [Care Minutes per Resident],
+            REMOVEFILTERS ( 'Date' ),
+            'Date'[Date] = ChartDay
+        )
+    )
+
+// ---------- Staff Costs ----------
+Payroll Cost =
+CALCULATE (
+    SUM ( Payroll[Amount] ),
+    USERELATIONSHIP ( Staff[HomeID], Homes[HomeID] )
+)
+
+Agency Cost = SUM ( AgencyInvoices[Amount] )
+
+Labour Cost = [Payroll Cost] + [Agency Cost]
+
+Budget Cost = SUM ( LabourBudget[BudgetCost] )
+
+Budget Variance = [Labour Cost] - [Budget Cost]
+
+Budget Variance % = DIVIDE ( [Budget Variance], [Budget Cost] )
+
+Overtime Cost = CALCULATE ( [Payroll Cost], Payroll[PayType] = "Overtime" )
+
+Sick Leave Cost = CALCULATE ( [Payroll Cost], Payroll[PayType] = "Sick leave" )
+
+Agency Cost % = DIVIDE ( [Agency Cost], [Labour Cost] )
+
+Labour Cost per Resident Day = DIVIDE ( [Labour Cost], [Resident Days] )
+
+// ---------- Payroll Exceptions ----------
+Exceptions = COUNTROWS ( vw_ExceptionDetail ) + 0
+
+Amount at Stake = SUM ( vw_ExceptionDetail[AmountAtStake] ) + 0
+
+Payroll $ at Stake =
+CALCULATE ( [Amount at Stake], vw_ExceptionDetail[Area] = "Payroll" )
+
+Agency $ at Stake =
+CALCULATE ( [Amount at Stake], vw_ExceptionDetail[Area] = "Agency" )
+
+Amount at Stake % of Labour = DIVIDE ( [Amount at Stake], [Labour Cost] )
+
+// ---------- Calculated table (Modeling > New table) ----------
+// Chart Dates =
+// CALCULATETABLE (
+//     VALUES ( 'Date'[Date] ),
+//     'Date'[Date] >= DATE ( 2025, 7, 1 ),
+//     'Date'[Date] <= DATE ( 2026, 6, 30 )
+// )
